@@ -138,7 +138,7 @@ class Runtime(
     var linuxScale by mutableStateOf(prefs.getInt(LINUX_SCALE, 1).coerceIn(1, 2))
         private set
 
-    fun setLinuxScale(scale: Int) {
+    fun updateLinuxScale(scale: Int) {
         val s = scale.coerceIn(1, 2)
         if (s == linuxScale) return
         linuxScale = s

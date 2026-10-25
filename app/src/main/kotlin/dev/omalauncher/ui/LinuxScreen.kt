@@ -224,10 +224,10 @@ private fun DisplayScaleRow(runtime: Runtime) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BracketAction("1x", if (scale == 1) Palette.accent else Palette.muted, Modifier.passesKeys()) {
-                runtime.setLinuxScale(1)
+                runtime.updateLinuxScale(1)
             }
             BracketAction("2x", if (scale == 2) Palette.accent else Palette.muted, Modifier.passesKeys()) {
-                runtime.setLinuxScale(2)
+                runtime.updateLinuxScale(2)
             }
         }
     }
