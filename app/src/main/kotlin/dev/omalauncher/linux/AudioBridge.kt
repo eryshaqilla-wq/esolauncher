@@ -70,12 +70,24 @@ class AudioBridge(
 
     /** Starts the bridge, or resumes it after [stop]. */
     fun start() {
-        if (proot.activeEnvironment.isRoot) return
         running = true
         if (started) return
         started = true
-        proot.hostFile("/tmp/pulse.pa").writeText(config)
+        val env = proot.activeEnvironment
+        if (env.isRoot) {
+            runCatching {
+                File(env.rootfsPath, "tmp/pulse.pa").writeText(config)
+            }
+        } else {
+            proot.hostFile("/tmp/pulse.pa").writeText(config)
+        }
         File(proot.runtimeDir, "pulse").mkdirs()
+        runCatching {
+            if (!fifo.exists()) {
+                android.system.Os.mkfifo(fifo.path, 0x1ff) // 0777
+                android.system.Os.chmod(fifo.path, 0x1ff)
+            }
+        }
         thread(name = "pulseaudio", isDaemon = true) { superviseDaemon() }
         thread(name = "audio-bridge", isDaemon = true) { pump() }
         thread(name = "audio-idle", isDaemon = true) { pauseWhenIdle() }
@@ -92,10 +104,41 @@ class AudioBridge(
         while (true) {
             while (!running) Thread.sleep(1000)
             val started = SystemClock.elapsedRealtime()
+            val env = proot.activeEnvironment
             val code =
                 runCatching {
-                    proot.run("exec pulseaudio -n -F /tmp/pulse.pa --daemonize=no --use-pid-file=no --exit-idle-time=-1 --disable-shm=yes") {
-                        Log.i(TAG, "[pulseaudio] $it")
+                    if (env.isRoot) {
+                        val host = if (env.type == dev.omalauncher.linux.eso.EsoRunnerType.DROIDSPACES) "172.28.0.1" else "127.0.0.1"
+                        val hasTcpPulse = try {
+                            java.net.Socket().use { s ->
+                                s.connect(java.net.InetSocketAddress(host, 4713), 200)
+                                true
+                            }
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (hasTcpPulse) {
+                            Thread.sleep(5000)
+                            0
+                        } else {
+                            val pulseBin = File(env.rootfsPath, "usr/bin/pulseaudio")
+                            if (!pulseBin.exists()) {
+                                Thread.sleep(5000)
+                                -1
+                            } else {
+                                val pulsePa = File(env.rootfsPath, "tmp/pulse.pa")
+                                pulsePa.writeText(config)
+                                val p = Runtime.getRuntime().exec(arrayOf(
+                                    "su", "-c",
+                                    "chroot ${env.rootfsPath} /usr/bin/pulseaudio -n -F /tmp/pulse.pa --daemonize=no --use-pid-file=no --exit-idle-time=-1 --disable-shm=yes"
+                                ))
+                                p.waitFor()
+                            }
+                        }
+                    } else {
+                        proot.run("exec pulseaudio -n -F /tmp/pulse.pa --daemonize=no --use-pid-file=no --exit-idle-time=-1 --disable-shm=yes") {
+                            Log.i(TAG, "[pulseaudio] $it")
+                        }
                     }
                 }.getOrElse { -1 }
             if (SystemClock.elapsedRealtime() - started > MAX_BACKOFF_MS) backoff = 1000L

@@ -71,6 +71,9 @@ object EsoBridge {
             if ! grep -q "$rootfs/run/user/0" /proc/mounts; then
                 /system/bin/toybox mount "${runtimeDir.path}" "$rootfs/run/user/0" 2>/dev/null || true
             fi
+            chmod 666 "${runtimeDir.path}/audio.fifo" 2>/dev/null || true
+            chmod -R 777 "${runtimeDir.path}/pulse" 2>/dev/null || true
+            chmod 666 "${runtimeDir.path}/pulse/native" 2>/dev/null || true
 
             # Standalone VirGL 3D Server Superpower (100% Independent of Termux)
             chmod -R 777 "${virglDir.path}" 2>/dev/null || true
@@ -116,6 +119,22 @@ object EsoBridge {
         val rootfs = env.rootfsPath
         val waylandSocketName = "wayland-0"
 
+        val hasTcpPulse = try {
+            val host = if (env.type == EsoRunnerType.DROIDSPACES) "172.28.0.1" else "127.0.0.1"
+            java.net.Socket().use { s ->
+                s.connect(java.net.InetSocketAddress(host, 4713), 150)
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+
+        val pulseServer = if (hasTcpPulse) {
+            if (env.type == EsoRunnerType.DROIDSPACES) "tcp:172.28.0.1:4713" else "tcp:127.0.0.1:4713"
+        } else {
+            "unix:/run/user/0/pulse/native"
+        }
+
         val envVars = listOf(
             "HOME=/root",
             "USER=root",
@@ -134,7 +153,7 @@ object EsoBridge {
             "VTEST_SOCKET_NAME=/tmp/.virgl_test",
             "MESA_GL_VERSION_OVERRIDE=4.0",
             "MESA_GLES_VERSION_OVERRIDE=3.2",
-            "PULSE_SERVER=" + if (env.type == EsoRunnerType.DROIDSPACES) "tcp:172.28.0.1:4713" else "tcp:127.0.0.1:4713"
+            "PULSE_SERVER=$pulseServer"
         ).joinToString(" ")
 
         val command = when (env.type) {
