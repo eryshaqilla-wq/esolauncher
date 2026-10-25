@@ -169,6 +169,8 @@ private fun Installed(runtime: Runtime) {
             )
         }
     }
+    Spacer(Modifier.height(8.dp))
+    DisplayScaleRow(runtime)
     if (runtime.gpu.supported) {
         Spacer(Modifier.height(8.dp))
         GpuRow(runtime)
@@ -201,6 +203,31 @@ private fun Installed(runtime: Runtime) {
                 val actionLabel = if (env.isRoot) "disconnect" else "remove"
                 BracketAction(actionLabel, Palette.red, Modifier.passesKeys(), runtime::removeLinux)
                 BracketAction("cancel", Palette.muted, Modifier.focusRequester(cancel).passesKeys(ask)) { confirm = false }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisplayScaleRow(runtime: Runtime) {
+    val scale = runtime.linuxScale
+    Row(
+        Modifier.card(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            BasicText("display scale", style = Mono.copy(fontSize = TextSize.Item))
+            BasicText(
+                if (scale == 1) "1x · 1080p desktop (crisp)" else "2x · comfortable touch",
+                style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BracketAction("1x", if (scale == 1) Palette.accent else Palette.muted, Modifier.passesKeys()) {
+                runtime.setLinuxScale(1)
+            }
+            BracketAction("2x", if (scale == 2) Palette.accent else Palette.muted, Modifier.passesKeys()) {
+                runtime.setLinuxScale(2)
             }
         }
     }

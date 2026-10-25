@@ -104,6 +104,12 @@ class WindowManager : WindowManagerHooks {
 
     fun close(window: XdgToplevel) = synchronized(server) { window.close() }
 
+    fun refreshLayout() {
+        synchronized(server) {
+            appWindows.forEach { configure(it) }
+        }
+    }
+
     fun focus(toplevel: XdgToplevel?) {
         val previous = focused
         focused = toplevel

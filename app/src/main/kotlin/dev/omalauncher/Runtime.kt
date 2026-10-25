@@ -134,6 +134,19 @@ class Runtime(
     var launcherReady by mutableStateOf(prefs.getBoolean(SETUP_DONE, false) || bootstrap.wanted)
         private set
 
+    /** Linux display scale: 1 (native 1080p desktop) or 2 (touch friendly). Default is 1 for clean desktop apps. */
+    var linuxScale by mutableStateOf(prefs.getInt(LINUX_SCALE, 1).coerceIn(1, 2))
+        private set
+
+    fun setLinuxScale(scale: Int) {
+        val s = scale.coerceIn(1, 2)
+        if (s == linuxScale) return
+        linuxScale = s
+        prefs.edit().putInt(LINUX_SCALE, s).apply()
+        updateOutput()
+        wm.refreshLayout()
+    }
+
     /** Linux is installed and its services run: guest commands (like the update check) can go. */
     private var linux = false
 
@@ -376,25 +389,21 @@ class Runtime(
      */
     private fun updateOutput() {
         val metrics = context.resources.displayMetrics
-        val mmPerPx = 25.4f / metrics.xdpi
         val scale = outputScale()
         server.updateOutput(
             OutputInfo(
                 metrics.widthPixels,
                 metrics.heightPixels,
                 scale,
-                (metrics.widthPixels * mmPerPx).toInt(),
-                (metrics.heightPixels * mmPerPx).toInt(),
+                0,
+                0,
             ),
         )
         terminalFont.update(metrics.density, context.resources.configuration.fontScale, scale, metrics.widthPixels)
     }
 
-    /** wl_output scales are integers, so the density rounds down (2.625 -> 2); [TerminalFont] makes up the rest. */
-    private fun outputScale() =
-        context.resources.displayMetrics.density
-            .toInt()
-            .coerceIn(1, 4)
+    /** Linux display scale: defaults to 1 for 1:1 desktop pixel mapping; toggleable to 2 for larger touch targets. */
+    private fun outputScale() = linuxScale
 
     /** Re-runs update steps that failed, e.g. offline; see [Bootstrap.updates]. */
     fun retryUpdates() {
@@ -660,5 +669,6 @@ class Runtime(
     companion object {
         private const val TAG = "runtime"
         private const val SETUP_DONE = "setup_done"
+        private const val LINUX_SCALE = "linux_scale"
     }
 }
