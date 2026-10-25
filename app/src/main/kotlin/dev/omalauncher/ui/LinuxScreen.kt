@@ -167,7 +167,7 @@ private fun Installed(runtime: Runtime) {
             )
         }
     }
-    if (runtime.gpu.supported && !env.isRoot) {
+    if (runtime.gpu.supported) {
         Spacer(Modifier.height(8.dp))
         GpuRow(runtime)
     }
@@ -208,15 +208,13 @@ private fun Installed(runtime: Runtime) {
 @Composable
 private fun GpuRow(runtime: Runtime) {
     val gpu = runtime.gpu
+    val scope = rememberCoroutineScope()
     val state = gpu.state
     val status =
         when {
             state is JobState.Working -> "${state.action}…"
-            gpu.active -> "on · ${gpu.device ?: "GPU"} · for apps opened from now on"
-            gpu.wanted && state is JobState.Failed -> "off: the GPU failed its check after a system update"
-            gpu.wanted -> "on · waiting for its check"
-            state is JobState.Failed -> "the GPU failed its check; apps stay in software"
-            else -> "experimental · ${gpu.driverLabel} · faster OpenGL and Vulkan apps and games; terminal apps don't change"
+            gpu.active -> "on · ${gpu.driverLabel} · ${gpu.device ?: "GPU"}"
+            else -> "off · software rendering"
         }
     Column(Modifier.card()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,16 +224,21 @@ private fun GpuRow(runtime: Runtime) {
                     status,
                     style = Mono.copy(color = if (gpu.active) Palette.green else Palette.muted, fontSize = TextSize.Small),
                 )
-            }
-            // Keys on one wait out its job, for the one it ends with.
-            val passed = Modifier.takesPassedKeys().passesKeys()
-            when {
-                state is JobState.Working -> {}
-                gpu.wanted -> {
-                    if (state is JobState.Failed) BracketAction("retry", Palette.accent, passed) { runtime.setGpu(true) }
-                    BracketAction("turn off", Palette.red, passed) { runtime.setGpu(false) }
+                if (!gpu.isSnapdragon) {
+                    BasicText(
+                        "chipset non-snapdragon: native panvk diblokir demi proteksi soc, virgl aktif",
+                        style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
+                    )
                 }
-                else -> BracketAction("turn on", Palette.accent, passed) { runtime.setGpu(true) }
+            }
+            val passed = Modifier.takesPassedKeys().passesKeys()
+            if (gpu.isSnapdragon) {
+                val nextLabel = if (gpu.mode == dev.omalauncher.linux.EsoGpuMode.VIRGL) "mode: native" else "mode: virgl"
+                BracketAction(nextLabel, Palette.accent, passed) { scope.launch { gpu.toggleMode() } }
+            } else {
+                val actionLabel = if (gpu.active) "turn off" else "turn on (virgl)"
+                val color = if (gpu.active) Palette.red else Palette.accent
+                BracketAction(actionLabel, color, passed) { scope.launch { gpu.toggleMode() } }
             }
         }
         JobLog(state)

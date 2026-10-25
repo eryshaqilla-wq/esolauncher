@@ -40,6 +40,17 @@ object EsoBridge {
             if ! grep -q "$rootfs/run/user/0" /proc/mounts; then
                 /system/bin/toybox mount "${runtimeDir.path}" "$rootfs/run/user/0" 2>/dev/null || true
             fi
+            mkdir -p "$rootfs/tmp/.virgl" 2>/dev/null || true
+            mkdir -p "$rootfs/data/data/com.termux/files/usr/tmp/.virgl" 2>/dev/null || true
+            if [ -d "/data/data/com.termux/files/usr/tmp/.virgl" ]; then
+                chmod 777 /data/data/com.termux/files/usr/tmp/.virgl 2>/dev/null || true
+                chmod 666 /data/data/com.termux/files/usr/tmp/.virgl/.virgl_test 2>/dev/null || true
+                if ! grep -q "$rootfs/data/data/com.termux/files/usr/tmp/.virgl" /proc/mounts; then
+                    /system/bin/toybox mount -o bind /data/data/com.termux/files/usr/tmp/.virgl "$rootfs/data/data/com.termux/files/usr/tmp/.virgl" 2>/dev/null || true
+                fi
+            fi
+            ln -sfn /data/data/com.termux/files/usr/tmp/.virgl/.virgl_test "$rootfs/tmp/.virgl/.virgl_test" 2>/dev/null || true
+            ln -sfn /data/data/com.termux/files/usr/tmp/.virgl/.virgl_test "$rootfs/tmp/.virgl_test" 2>/dev/null || true
         """.trimIndent()
 
         runCatching {
@@ -76,6 +87,10 @@ object EsoBridge {
             "QT_QPA_PLATFORM=wayland",
             "MOZ_ENABLE_WAYLAND=1",
             "SDL_VIDEODRIVER=wayland",
+            "GALLIUM_DRIVER=virpipe",
+            "VTEST_SOCKET_NAME=/tmp/.virgl/.virgl_test",
+            "MESA_GL_VERSION_OVERRIDE=4.0",
+            "MESA_GLES_VERSION_OVERRIDE=3.2",
             "PULSE_SERVER=" + if (env.type == EsoRunnerType.DROIDSPACES) "tcp:172.28.0.1:4713" else "tcp:127.0.0.1:4713"
         ).joinToString(" ")
 
