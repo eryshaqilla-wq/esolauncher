@@ -6,12 +6,12 @@ widget "system" {
 
   requires { pacman: ["procps-ng", "fastfetch"] }
 
-  source info = cmd("printf '{\"kernel\":\"%s\",\"packages\":%s,\"up\":\"%s\"}' \"$(uname -r | cut -d- -f1)\" \"$(pacman -Q | wc -l)\" \"$(uptime -p | sed 's/up //')\"") every 10m json
+  source info = cmd("printf '{\"kernel\":\"%s\",\"packages\":%s,\"up\":\"%s\"}' \"$(uname -r | cut -d- -f1)\" \"$(command -v pacman >/dev/null 2>&1 && pacman -Q | wc -l || dpkg-query -l 2>/dev/null | grep '^ii' | wc -l)\" \"$(uptime -p | sed 's/up //')\"") every 10m json
 
   onTap: terminal("fastfetch")
 
   Column {
-    Text { text: "arch linux arm"; style: muted }
+    Text { text: "linux"; style: muted }
     Text { text: "kernel ${info.kernel}"; style: small }
     Text { text: "${info.packages} packages"; style: small }
     Text { text: "up ${info.up}"; style: small }

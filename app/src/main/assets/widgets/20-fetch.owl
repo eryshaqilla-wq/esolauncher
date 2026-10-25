@@ -10,13 +10,22 @@ widget "fetch" {
   source sys = android.system every 5s
   source bat = android.battery
   source net = android.network every 5s
-  // The Arch side, once Linux is installed. Base tools only, so it doesn't make the widget need Linux.
+  // Linux system stats, dynamically supporting both Arch and Debian/NetHunter
   source lx = cmd("""
     . /etc/os-release
+    if command -v pacman >/dev/null 2>&1; then
+      pkgs=$(pacman -Qq 2>/dev/null | wc -l)
+      expl=$(pacman -Qqe 2>/dev/null | wc -l)
+      upg=$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1 | cut -c2-11)
+    else
+      pkgs=$(dpkg-query -f '${binary:Package}\n' -W 2>/dev/null | wc -l)
+      expl=$(apt-mark showmanual 2>/dev/null | wc -l)
+      upg=$(grep -a ' upgrade ' /var/log/dpkg.log 2>/dev/null | tail -1 | cut -d' ' -f1)
+    fi
     printf '{"os":"%s","pkgs":%s,"explicit":%s,"shell":"%s","upgraded":"%s"}' \
-      "$PRETTY_NAME" "$(pacman -Qq | wc -l)" "$(pacman -Qqe | wc -l)" \
-      "$(basename "$SHELL") $(bash --version | head -1 | awk '{print $4}' | cut -d'(' -f1)" \
-      "$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1 | cut -c2-11)"
+      "$PRETTY_NAME" "${pkgs:-0}" "${expl:-0}" \
+      "$(basename "${SHELL:-sh}") $(bash --version 2>/dev/null | head -1 | awk '{print $4}' | cut -d'(' -f1)" \
+      "${upg:-never}"
   """) every 5m json optional
 
   let host = lower(replace(dev.model ?? "phone", " ", "-"))
@@ -192,10 +201,10 @@ widget "fetch" {
         Line { key: "upgraded"; value: lx.upgraded == "" ? "never" : lx.upgraded; size: 13; keyWidth: 110 }
         Row {
           justify: end
-          Button { text: "fastfetch ↗"; color: muted; onTap: terminal("command -v fastfetch >/dev/null || pacman -S --needed --noconfirm fastfetch; fastfetch", "fastfetch") }
+          Button { text: "fastfetch ↗"; color: muted; onTap: terminal("command -v fastfetch >/dev/null || (command -v pacman >/dev/null && pacman -S --needed --noconfirm fastfetch || apt-get update && apt-get install -y fastfetch); fastfetch", "fastfetch") }
         }
       } else {
-        Text { text: "not installed. arch linux arm adds a terminal, agents and pacman to the launcher."; style: small; color: muted }
+        Text { text: "not installed. linux adds a terminal, agents and packages to the launcher."; style: small; color: muted }
         Row {
           justify: end
           Button { text: "install linux"; color: accent; onTap: launcher("linux") }

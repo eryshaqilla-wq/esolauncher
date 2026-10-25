@@ -51,21 +51,18 @@ fun PackagesScreen(
 
     OverlayPanel("packages", onDismiss, contentWidth = ReadingWidth) {
         val env = runtime.proot.activeEnvironment
-        if (env.isRoot) {
-            BasicText(
-                "Package management for ${env.displayName} is handled natively via apt/dpkg in the terminal (foot).",
-                Modifier.padding(vertical = 8.dp),
-                style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
-            )
+        SearchField(query, onChange = { query = it }, onGo = {}, placeholder = "search packages")
+        val desc = if (env.isRoot) {
+            "${env.displayName} packages via apt/dpkg. Tap to install or remove native packages."
         } else {
-            SearchField(query, onChange = { query = it }, onGo = {}, placeholder = "search packages")
-            BasicText(
-                "Arch Linux ARM packages via pacman, and the AUR via yay. Installing also updates the system, so it can take a while. " +
-                    "AUR packages are user-submitted and built on the device: check their PKGBUILD on aur.archlinux.org first.",
-                Modifier.padding(vertical = 8.dp),
-                style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
-            )
+            "Arch Linux ARM packages via pacman, and the AUR via yay. Installing also updates the system, so it can take a while. " +
+                "AUR packages are user-submitted and built on the device: check their PKGBUILD on aur.archlinux.org first."
         }
+        BasicText(
+            desc,
+            Modifier.padding(vertical = 8.dp),
+            style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
+        )
         val list = loaded?.second.orEmpty()
         val status =
             when {

@@ -38,21 +38,52 @@ class Pacman(
 
     /**
      * Not offered for removal: what the launcher relies on (foot, fonts, Omarchy's apps), plus
-     * `base` (`-Rns base` would take pacman and bash with it) and the keyring installs need.
-     * Everything else is either safe to remove or required by something, which pacman refuses.
+     * base packages. Everything else is either safe to remove or required by something.
      */
-    val core = CORE_PACKAGES + setOf("base", "archlinuxarm-keyring")
+    val core: Set<String> get() = if (proot.activeEnvironment.isRoot) {
+        setOf("base-files", "dpkg", "apt", "bash", "coreutils", "foot")
+    } else {
+        CORE_PACKAGES + setOf("base", "archlinuxarm-keyring")
+    }
 
     private val localDb = File(proot.rootfs, "var/lib/pacman/local")
 
     /**
-     * The sync repos and the AUR together, best name matches first. AUR packages
-     * with the same name as a repo package are left out: pacman would win anyway.
+     * Search packages dynamically based on active environment (apt-cache on Debian/Kali/Ubuntu, pacman/AUR on Arch).
      */
     suspend fun search(query: String): List<Package> {
-        if (proot.activeEnvironment.isRoot) return emptyList()
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val env = proot.activeEnvironment
+        if (env.isRoot) {
+            val out = output("apt-cache search -- ${shellQuote(q)} 2>/dev/null | head -n $MAX_RESULTS")
+            if (out.isBlank()) return emptyList()
+            val installedNames = localNames()
+            val lower = q.lowercase()
+            return out.lines()
+                .filter { it.isNotBlank() && " - " in it }
+                .map { line ->
+                    val name = line.substringBefore(" - ").trim()
+                    val desc = line.substringAfter(" - ").trim()
+                    Package(
+                        name = name,
+                        version = "",
+                        description = desc,
+                        repo = "apt",
+                        installed = name in installedNames,
+                    )
+                }
+                .sortedWith(
+                    compareBy<Package>(
+                        { it.name != lower },
+                        { !it.name.startsWith(lower) },
+                        { lower !in it.name },
+                        { it.name },
+                    )
+                )
+                .take(MAX_RESULTS)
+        }
         return coroutineScope {
-            val q = query.trim()
             val aur = async { Aur.search(q) }
             val repos = searchRepos(q)
             val names = repos.mapTo(HashSet()) { it.name }
@@ -102,20 +133,40 @@ class Pacman(
     }
 
     /**
-     * Every installed package's name, from the local database's directory names:
-     * `name-pkgver-pkgrel`, where neither version part may contain a dash.
+     * Every installed package's name.
      */
     private suspend fun localNames(): Set<String> =
         withContext(Dispatchers.IO) {
-            localDb.list().orEmpty().mapTo(HashSet()) { it.substringBeforeLast('-').substringBeforeLast('-') }
+            if (proot.activeEnvironment.isRoot) {
+                val out = output("dpkg-query -W -f='\${Package}\\n' 2>/dev/null")
+                out.lines().filter { it.isNotBlank() }.toSet()
+            } else {
+                localDb.list().orEmpty().mapTo(HashSet()) { it.substringBeforeLast('-').substringBeforeLast('-') }
+            }
         }
 
     /**
-     * Explicitly installed packages (what `pacman -Qe` lists), read straight from the
-     * local database: much faster than starting proot.
+     * Explicitly installed packages (what `pacman -Qe` or `dpkg-query` lists).
      */
     suspend fun installed(): List<Package> {
-        if (proot.activeEnvironment.isRoot) return emptyList()
+        val env = proot.activeEnvironment
+        if (env.isRoot) {
+            val out = output("dpkg-query -W -f='\${Package}\\t\${Version}\\t\${binary:Summary}\\n' 2>/dev/null")
+            if (out.isBlank()) return emptyList()
+            return out.lines()
+                .filter { it.isNotBlank() && '\t' in it }
+                .map { line ->
+                    val parts = line.split('\t')
+                    Package(
+                        name = parts[0],
+                        version = parts.getOrElse(1) { "" },
+                        description = parts.getOrElse(2) { "" },
+                        repo = "apt",
+                        installed = true,
+                    )
+                }
+                .sortedBy { it.name }
+        }
         return withContext(Dispatchers.IO) {
             localDb
                 .listFiles()
@@ -142,7 +193,9 @@ class Pacman(
 
     /** A full sync plus the package, like the bootstrap: never a partial upgrade. */
     suspend fun install(pkg: Package): Boolean {
-        if (proot.activeEnvironment.isRoot) return false
+        if (proot.activeEnvironment.isRoot) {
+            return run(pkg.name, "installing", "DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y ${shellQuote(pkg.name)}")
+        }
         return if (pkg.repo == AUR) {
             run(pkg.name, "building", "/usr/local/lib/aur/install.sh ${shellQuote(pkg.name)}")
         } else {
@@ -168,7 +221,9 @@ class Pacman(
 
     /** Removes the package and the dependencies nothing else needs. */
     suspend fun remove(name: String): Boolean {
-        if (proot.activeEnvironment.isRoot) return false
+        if (proot.activeEnvironment.isRoot) {
+            return run(name, "removing", "DEBIAN_FRONTEND=noninteractive apt-get remove -y ${shellQuote(name)}")
+        }
         return run(name, "removing", "pacman -Rns --noconfirm ${shellQuote(name)}")
     }
 

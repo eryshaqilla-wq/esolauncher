@@ -174,8 +174,9 @@ private fun Welcome(
             Spacer(Modifier.height(10.dp))
             BasicText("omarchy on your home screen", style = Mono.copy(fontSize = TextSize.Large))
             Spacer(Modifier.height(10.dp))
+            val linuxName = selectedEnv?.displayName ?: "Linux"
             BasicText(
-                "Omarchy's themes and wallpapers, your Android apps, and home-screen widgets. Arch Linux adds " +
+                "Omarchy's themes and wallpapers, your Android apps, and home-screen widgets. $linuxName adds " +
                     "terminal apps and coding agents, now or later in settings.",
                 style = Mono.copy(color = Subtle, lineHeight = 20.sp),
             )

@@ -86,7 +86,6 @@ class SystemUpdates(
 
     /** Checks unless the last check is recent; [force] checks anyway. */
     suspend fun check(force: Boolean = false) {
-        if (proot.activeEnvironment.isRoot) return
         val now = System.currentTimeMillis()
         if (checking || job is JobState.Working) return
         if (!force && (now - (pending?.checkedAt ?: 0L) < CHECK_INTERVAL_MS || now - lastAttempt < RETRY_MS)) return
@@ -110,10 +109,13 @@ class SystemUpdates(
             Log.w(TAG, "check failed ($code): ${text.takeLast(300)}")
             return PendingUpdates(pending?.packages.orEmpty(), pending?.tools.orEmpty(), pending?.checkedAt ?: 0L, error = "couldn't reach the mirrors")
         }
+        val packagesSection = when {
+            "#apt\n" in text -> text.substringAfter("#apt\n").substringBefore("#mise")
+            "#pacman\n" in text -> text.substringAfter("#pacman\n").substringBefore("#mise")
+            else -> ""
+        }
         val packages =
-            text
-                .substringAfter("#pacman\n")
-                .substringBefore("#mise")
+            packagesSection
                 .lines()
                 .map { it.trim() }
                 // "name old -> new"
@@ -162,14 +164,22 @@ class SystemUpdates(
          */
         val CHECK_SCRIPT =
             """
-            t=/tmp/omalauncher-updates
-            mkdir -p "${'$'}t"
-            ln -sfn /var/lib/pacman/local "${'$'}t/local"
-            if pacman -Sy --dbpath "${'$'}t" --logfile /dev/null >/dev/null 2>&1; then
-              echo '#pacman'
-              pacman -Qu --dbpath "${'$'}t" 2>/dev/null
-            else
-              echo '#pacman-error'
+            if command -v pacman >/dev/null 2>&1; then
+              t=/tmp/omalauncher-updates
+              mkdir -p "${'$'}t"
+              ln -sfn /var/lib/pacman/local "${'$'}t/local"
+              if pacman -Sy --dbpath "${'$'}t" --logfile /dev/null >/dev/null 2>&1; then
+                echo '#pacman'
+                pacman -Qu --dbpath "${'$'}t" 2>/dev/null
+              else
+                echo '#pacman-error'
+              fi
+            elif command -v apt-get >/dev/null 2>&1; then
+              echo '#apt'
+              apt-get update -qq >/dev/null 2>&1
+              apt-get --just-print upgrade 2>/dev/null | grep '^Inst ' | while read -r _ pkg _ old _ new; do
+                echo "${'$'}pkg ${'$'}old -> ${'$'}new"
+              done
             fi
             echo '#mise'
             if command -v mise >/dev/null; then mise outdated --json 2>/dev/null; fi
@@ -177,13 +187,15 @@ class SystemUpdates(
             """.trimIndent()
 
         /**
-         * Databases refreshed (-Syy) even if pacman thinks they're current: mirrors lag each other. The old
-         * versions go even when one tool fails to upgrade, or every updated agent stays installed twice
-         * (1.1 GB); the tool that failed keeps its old version, since its config still selects it.
+         * Upgrades packages and tools dynamically for both pacman and apt.
          */
         val UPDATE_SCRIPT =
-            "pacman -Syyu --noconfirm && $CLEAN_PACMAN_CACHE && " +
-                "if command -v mise >/dev/null; then $MISE_SELF_UPDATE && $MISE_NODE_FOR_AGENTS && mise upgrade; " +
-                "ok=\$?; $MISE_PRUNE; $MISE_CLEANUP; [ \$ok -eq 0 ]; fi"
+            "if command -v pacman >/dev/null 2>&1; then " +
+                "pacman -Syyu --noconfirm && $CLEAN_PACMAN_CACHE; " +
+            "elif command -v apt-get >/dev/null 2>&1; then " +
+                "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y && apt-get clean; " +
+            "fi && " +
+            "if command -v mise >/dev/null; then $MISE_SELF_UPDATE && $MISE_NODE_FOR_AGENTS && mise upgrade; " +
+            "ok=\$?; $MISE_PRUNE; $MISE_CLEANUP; [ \$ok -eq 0 ]; fi"
     }
 }

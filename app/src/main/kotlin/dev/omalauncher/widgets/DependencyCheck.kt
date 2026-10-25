@@ -13,14 +13,22 @@ internal object DependencyCheck {
         val programs: Set<String>,
     )
 
-    /** pacman -T prints the packages that aren't installed. Names come from widget files: quoted. */
+    /** Prints packages and programs that aren't installed, dynamically checking pacman or dpkg. */
     fun script(
         packages: Collection<String>,
         programs: Collection<String>,
     ): String =
-        (if (packages.isEmpty()) "" else "pacman -T ${packages.joinToString(" ") { shellQuote(it) }} | sed 's/^/pkg /'; ") +
-            (if (programs.isEmpty()) "" else "for c in ${programs.joinToString(" ") { shellQuote(it) }}; do command -v \"\$c\" >/dev/null || echo \"bin \$c\"; done; ") +
-            "true"
+        (if (packages.isEmpty()) "" else {
+            "if command -v pacman >/dev/null 2>&1; then " +
+                "pacman -T ${packages.joinToString(" ") { shellQuote(it) }} | sed 's/^/pkg /'; " +
+            "elif command -v dpkg-query >/dev/null 2>&1; then " +
+                "for p in ${packages.joinToString(" ") { shellQuote(it) }}; do " +
+                    "dpkg-query -W -f='\${Status}' \"\$p\" 2>/dev/null | grep -q \"ok installed\" || echo \"pkg \$p\"; " +
+                "done; " +
+            "fi; "
+        }) +
+        (if (programs.isEmpty()) "" else "for c in ${programs.joinToString(" ") { shellQuote(it) }}; do command -v \"\$c\" >/dev/null || echo \"bin \$c\"; done; ") +
+        "true"
 
     fun parse(out: String): Missing {
         val lines = out.lines().map { it.trim() }

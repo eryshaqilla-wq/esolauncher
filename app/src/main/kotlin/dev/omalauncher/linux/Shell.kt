@@ -10,15 +10,25 @@ import kotlinx.coroutines.withContext
 fun shellQuote(s: String) = shQuote(s)
 
 /**
- * Installs [packages] with a full sync, never a partial upgrade, then drops
- * the downloaded packages: storage on phones is tight. [refresh] re-downloads
- * the package databases even if pacman thinks they're current: mirrors lag
- * each other, and a database from one names versions another no longer has.
+ * Installs [packages] with a full sync, never a partial upgrade.
+ * Dynamically runs pacman on Arch or apt-get on Debian/Ubuntu/Kali.
  */
+fun packageInstall(
+    packages: Collection<String>,
+    refresh: Boolean = false,
+): String {
+    val pkgs = packages.joinToString(" ") { shellQuote(it) }
+    return "if command -v pacman >/dev/null 2>&1; then " +
+        "pacman -Sy${if (refresh) "y" else ""}u --noconfirm --needed $pkgs && rm -rf /var/cache/pacman/pkg/*; " +
+        "elif command -v apt-get >/dev/null 2>&1; then " +
+        "DEBIAN_FRONTEND=noninteractive apt-get update ${if (refresh) "" else "-qq"} && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs && apt-get clean; " +
+        "fi"
+}
+
 fun pacmanInstall(
     packages: Collection<String>,
     refresh: Boolean = false,
-) = "pacman -Sy${if (refresh) "y" else ""}u --noconfirm --needed ${packages.joinToString(" ") { shellQuote(it) }} && $CLEAN_PACMAN_CACHE"
+) = packageInstall(packages, refresh)
 
 /** `pacman -Scc --noconfirm` answers its "remove all?" prompt with the default, No, so delete directly. */
 const val CLEAN_PACMAN_CACHE = "rm -rf /var/cache/pacman/pkg/*"

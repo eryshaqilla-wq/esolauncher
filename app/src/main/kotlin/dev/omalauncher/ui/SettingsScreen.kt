@@ -73,8 +73,13 @@ fun SettingsScreen(
                 is LinuxState.Installing -> "installing" + (l.progress?.let { " ${(it * 100).toInt()}%" } ?: "") + " · ${l.stage.label}"
                 is LinuxState.Failed -> "setup stopped · retry"
                 LinuxState.Removing -> "removing…"
-                else -> "not installed · install Arch Linux for terminal apps and agents"
+                else -> "not installed · install Linux for terminal apps and agents"
             }
+        val env = runtime.proot.activeEnvironment
+        val pkgSubtitle = if (installed) {
+            if (env.isRoot) "install Linux apps and tools with apt"
+            else "install Linux apps and tools with pacman and the AUR"
+        } else "needs linux"
         val rows =
             listOfNotNull(
                 Triple("style", runtime.themes.current?.title ?: "theme, background, home screen", onStyle),
@@ -86,7 +91,7 @@ fun SettingsScreen(
                 } else {
                     Triple("coding agents", "needs linux", onLinux)
                 },
-                Triple("packages", if (installed) "install Linux apps and tools with pacman and the AUR" else "needs linux", if (installed) onPackages else onLinux),
+                Triple("packages", pkgSubtitle, if (installed) onPackages else onLinux),
                 if (localNetworkMissing) {
                     Triple("local network", "let widgets and linux reach your printer, home assistant, …") {
                         askLocalNetwork.launch(LocalNetwork.PERMISSION)
