@@ -291,7 +291,7 @@ class Bootstrap(
         choose(picked)
         val env = proot.activeEnvironment
         if (env.isRoot) {
-            journal.record("root-installed")
+            journal.completeSetup()
             _state.value = LinuxState.Installed
             return
         }

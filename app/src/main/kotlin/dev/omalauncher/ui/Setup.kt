@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,8 +77,9 @@ internal fun SetupScreen(runtime: Runtime) {
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
+    val context = LocalContext.current
     LaunchedEffect(Unit) {
-        val envs = dev.omalauncher.linux.eso.EsoDetector.scanEnvironments(runtime.context)
+        val envs = dev.omalauncher.linux.eso.EsoDetector.scanEnvironments(context)
         detectedEnvs = envs
         val rootEnv = envs.firstOrNull { it.isRoot }
         if (rootEnv != null) {
@@ -132,7 +134,7 @@ internal fun SetupScreen(runtime: Runtime) {
                     StartButton(linux) {
                         started = true
                         selectedEnv?.let {
-                            dev.omalauncher.linux.eso.EsoDetector.setActiveEnvironment(runtime.context, it)
+                            dev.omalauncher.linux.eso.EsoDetector.setActiveEnvironment(context, it)
                         }
                         if (linux) install(picked)
                         fetchTheme()
@@ -202,8 +204,8 @@ private fun Welcome(
                     val isSelected = linux && selectedEnv?.id == env.id
                     Choice(
                         title = if (env.isRoot) "⚡ ${env.displayName}" else env.displayName,
-                        subtitle = env.description,
-                        picked = isSelected,
+                        description = env.description,
+                        on = isSelected,
                         onToggle = {
                             if (isSelected) {
                                 onToggleLinux()
@@ -304,7 +306,7 @@ private fun ThemeDownloadProgress(
 
 /** A toggle as a bordered row: [title], a one-line [description], and a check box. */
 @Composable
-private fun Choice(
+internal fun Choice(
     title: String,
     description: String,
     on: Boolean,

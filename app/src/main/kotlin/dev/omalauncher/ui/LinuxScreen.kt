@@ -90,13 +90,14 @@ fun rememberLinuxInstall(runtime: Runtime): (List<String>) -> Unit {
 
 @Composable
 private fun InstallOffer(runtime: Runtime) {
+    val context = LocalContext.current
     var detectedEnvs by remember { mutableStateOf<List<dev.omalauncher.linux.eso.EsoEnvironment>>(emptyList()) }
     var selectedEnv by remember { mutableStateOf<dev.omalauncher.linux.eso.EsoEnvironment?>(null) }
     var picked by rememberSaveable { mutableStateOf(listOf("agy", "claude")) }
     val install = rememberLinuxInstall(runtime)
 
     LaunchedEffect(Unit) {
-        val envs = dev.omalauncher.linux.eso.EsoDetector.scanEnvironments(runtime.context)
+        val envs = dev.omalauncher.linux.eso.EsoDetector.scanEnvironments(context)
         detectedEnvs = envs
         val rootEnv = envs.firstOrNull { it.isRoot }
         if (rootEnv != null) {
@@ -119,8 +120,8 @@ private fun InstallOffer(runtime: Runtime) {
             for (env in detectedEnvs) {
                 Choice(
                     title = if (env.isRoot) "⚡ ${env.displayName}" else env.displayName,
-                    subtitle = env.description,
-                    picked = selectedEnv?.id == env.id,
+                    description = env.description,
+                    on = selectedEnv?.id == env.id,
                     onToggle = { selectedEnv = env }
                 )
             }
@@ -136,7 +137,7 @@ private fun InstallOffer(runtime: Runtime) {
 
     PrimaryButton(buttonText, Modifier.takesPassedKeys().passesKeys()) {
         selectedEnv?.let {
-            dev.omalauncher.linux.eso.EsoDetector.setActiveEnvironment(runtime.context, it)
+            dev.omalauncher.linux.eso.EsoDetector.setActiveEnvironment(context, it)
         }
         install(picked)
     }
