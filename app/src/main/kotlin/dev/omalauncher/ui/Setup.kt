@@ -70,9 +70,24 @@ internal fun SetupScreen(runtime: Runtime) {
     // Claude Code first, like Omarchy's default agent; the first picked becomes the launcher's default.
     var picked by rememberSaveable { mutableStateOf(listOf(AGENTS.first().bin)) }
     var started by remember { mutableStateOf(false) }
+    var detectedEnvs by remember { mutableStateOf<List<dev.omalauncher.linux.eso.EsoEnvironment>>(emptyList()) }
+    var selectedEnv by remember { mutableStateOf<dev.omalauncher.linux.eso.EsoEnvironment?>(null) }
     val install = rememberLinuxInstall(runtime)
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        val envs = dev.omalauncher.linux.eso.EsoDetector.scanEnvironments(runtime.context)
+        detectedEnvs = envs
+        val rootEnv = envs.firstOrNull { it.isRoot }
+        if (rootEnv != null) {
+            selectedEnv = rootEnv
+            linux = true
+            picked = listOf("agy", "claude")
+        } else {
+            selectedEnv = envs.firstOrNull()
+        }
+    }
 
     // Only the picked theme now; the rest download in the background once home is up.
     fun fetchTheme() {
@@ -96,7 +111,17 @@ internal fun SetupScreen(runtime: Runtime) {
                 if (started) {
                     ThemeDownloadProgress(themes.choices.firstOrNull { it.name == themes.picked }?.title?.lowercase() ?: themes.picked, error, onRetry = ::fetchTheme, onSkip = runtime::finishWelcome)
                 } else {
-                    Welcome(themes, pickedFocus, linux, { linux = !linux }, picked) { bin -> picked = if (bin in picked) picked - bin else picked + bin }
+                    Welcome(
+                        themes = themes,
+                        pickedFocus = pickedFocus,
+                        linux = linux,
+                        onToggleLinux = { linux = !linux },
+                        detectedEnvs = detectedEnvs,
+                        selectedEnv = selectedEnv,
+                        onSelectEnv = { selectedEnv = it },
+                        picked = picked,
+                        onToggle = { bin -> picked = if (bin in picked) picked - bin else picked + bin }
+                    )
                 }
             }
         }
@@ -106,6 +131,9 @@ internal fun SetupScreen(runtime: Runtime) {
                 Appear(3) {
                     StartButton(linux) {
                         started = true
+                        selectedEnv?.let {
+                            dev.omalauncher.linux.eso.EsoDetector.setActiveEnvironment(runtime.context, it)
+                        }
                         if (linux) install(picked)
                         fetchTheme()
                     }
@@ -124,7 +152,7 @@ private fun Wordmark() {
         }
     }
     Spacer(Modifier.height(20.dp))
-    BasicText("◆ omalauncher", style = Mono.copy(color = Palette.accent, fontSize = 28.sp, fontWeight = FontWeight.Bold))
+    BasicText("◆ esolauncher", style = Mono.copy(color = Palette.accent, fontSize = 28.sp, fontWeight = FontWeight.Bold))
 }
 
 @Composable
@@ -133,6 +161,9 @@ private fun Welcome(
     pickedFocus: FocusRequester,
     linux: Boolean,
     onToggleLinux: () -> Unit,
+    detectedEnvs: List<dev.omalauncher.linux.eso.EsoEnvironment>,
+    selectedEnv: dev.omalauncher.linux.eso.EsoEnvironment?,
+    onSelectEnv: (dev.omalauncher.linux.eso.EsoEnvironment) -> Unit,
     picked: List<String>,
     onToggle: (String) -> Unit,
 ) {
@@ -164,11 +195,31 @@ private fun Welcome(
     Spacer(Modifier.height(32.dp))
     Appear(2) {
         Column {
-            Label("linux")
+            Label("linux environment")
             Spacer(Modifier.height(12.dp))
-            Choice("also set up Arch Linux", "terminal apps, agents, pacman · ~1 GB download, 3 GB space", linux, onToggleLinux)
+            if (detectedEnvs.isNotEmpty()) {
+                for (env in detectedEnvs) {
+                    val isSelected = linux && selectedEnv?.id == env.id
+                    Choice(
+                        title = if (env.isRoot) "⚡ ${env.displayName}" else env.displayName,
+                        subtitle = env.description,
+                        picked = isSelected,
+                        onToggle = {
+                            if (isSelected) {
+                                onToggleLinux()
+                            } else {
+                                onSelectEnv(env)
+                                if (!linux) onToggleLinux()
+                            }
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+            } else {
+                Choice("also set up Arch Linux", "terminal apps, agents, pacman · ~1 GB download, 3 GB space", linux, onToggleLinux)
+            }
             if (linux) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
                 AgentPicker(picked, onToggle)
             }
         }

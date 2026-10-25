@@ -534,7 +534,15 @@ class Runtime(
         val appId = "omarchy." + slug.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
         launchedNames[appId] = name
         if (agent != null) launchedAgents[appId] = agent
-        val args = command?.let { " -e bash -c " + shellQuote(it) }.orEmpty()
+        val env = proot.activeEnvironment
+        val args = if (command != null) {
+            val shell = if (env.isRoot) "zsh" else "bash"
+            " -e $shell -c " + shellQuote(command)
+        } else if (env.isRoot) {
+            " -e /bin/zsh -l"
+        } else {
+            ""
+        }
         launch("foot --app-id=$appId${terminalFont.optionFor(appId, command)}$args")
     }
 

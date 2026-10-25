@@ -9,9 +9,10 @@ import java.io.File
 class Proot(
     private val context: Context,
 ) {
+    val activeEnvironment get() = dev.omalauncher.linux.eso.EsoDetector.getActiveEnvironment(context)
     private val nativeDir = File(context.applicationInfo.nativeLibraryDir)
     val filesDir: File = context.filesDir
-    val rootfs = File(filesDir, "arch")
+    val rootfs: File get() = if (activeEnvironment.isRoot) File(activeEnvironment.rootfsPath) else File(filesDir, "arch")
     val tmpDir = File(filesDir, "tmp")
 
     /** Bound to XDG_RUNTIME_DIR inside the guest; holds the Wayland socket and the bridges' FIFOs. */
@@ -20,9 +21,9 @@ class Proot(
     val keymap = File(filesDir, "keymap.xkb")
 
     /** The guest user's home, /root, and the launcher's places in it. */
-    val home = File(rootfs, "root")
-    val applications = File(home, ".local/share/applications")
-    val launcherConfig = File(home, ".config/omalauncher")
+    val home: File get() = File(rootfs, "root")
+    val applications: File get() = File(home, ".local/share/applications")
+    val launcherConfig: File get() = File(home, ".config/omalauncher")
 
     /**
      * A listable stand-in for /sys: apps may only read /sys/devices/system/cpu,
@@ -103,6 +104,20 @@ class Proot(
         for (dir in listOf(tmpDir, runtimeDir)) {
             LauncherData.deleteTree(dir)
             dir.mkdirs()
+            runCatching {
+                android.system.Os.chmod(dir.path, 0x1ff) // 0777
+            }
+        }
+        if (!keymap.isFile) {
+            runCatching {
+                context.assets.open("keymap.xkb").use { input ->
+                    writeAtomically(keymap, input.readBytes())
+                }
+            }
+        }
+        val env = activeEnvironment
+        if (env.isRoot) {
+            return
         }
         // proot skips a bind whose host directory is missing, and the guest would then write into the rootfs.
         // The empty mount points make the bound directories show up in listings of their parents.
@@ -126,8 +141,16 @@ class Proot(
         if (!bwrapShim.isFile || !bwrapShim.readBytes().contentEquals(shim)) writeAtomically(bwrapShim, shim, executable = true)
     }
 
-    private fun command(script: String): List<String> =
-        listOf(
+    private fun command(script: String): List<String> {
+        val env = activeEnvironment
+        if (env.isRoot) {
+            return dev.omalauncher.linux.eso.EsoBridge.buildRootCommand(
+                env = env,
+                runtimeDir = runtimeDir,
+                script = script,
+            )
+        }
+        return listOf(
             File(nativeDir, "libproot.so").path,
             "--kill-on-exit",
             "--link2symlink",
@@ -178,6 +201,7 @@ class Proot(
                 "MOZ_ENABLE_WAYLAND=1",
                 "SDL_VIDEODRIVER=wayland",
             ) + graphicsEnv + listOf("/bin/sh", "-c", script)
+    }
 
     /**
      * Kills every proot we started and every guest process: before the rootfs
@@ -187,6 +211,8 @@ class Proot(
      * processes are the only ones whose /proc entries we can read.
      */
     fun killAll() {
+        val env = activeEnvironment
+        if (env.isRoot) return
         val proot = File(nativeDir, "libproot.so").path
         val loader = File(nativeDir, "libproot-loader.so").path
         for (dir in File("/proc").listFiles().orEmpty()) {
@@ -198,8 +224,14 @@ class Proot(
     }
 
     /** A guest `sh -c [script]`, stderr merged into stdout. Needs [prepare] to have run. */
-    fun process(script: String): ProcessBuilder =
-        ProcessBuilder(command(script)).apply {
+    fun process(script: String): ProcessBuilder {
+        val env = activeEnvironment
+        if (env.isRoot) {
+            return ProcessBuilder(command(script)).apply {
+                redirectErrorStream(true)
+            }
+        }
+        return ProcessBuilder(command(script)).apply {
             environment().apply {
                 clear()
                 put("PROOT_LOADER", File(nativeDir, "libproot-loader.so").path)
@@ -208,6 +240,7 @@ class Proot(
             }
             redirectErrorStream(true)
         }
+    }
 
     companion object {
         const val GUEST_HOME = "/root"

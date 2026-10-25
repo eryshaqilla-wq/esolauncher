@@ -90,17 +90,54 @@ fun rememberLinuxInstall(runtime: Runtime): (List<String>) -> Unit {
 
 @Composable
 private fun InstallOffer(runtime: Runtime) {
-    var picked by rememberSaveable { mutableStateOf(listOf(AGENTS.first().bin)) }
+    var detectedEnvs by remember { mutableStateOf<List<dev.omalauncher.linux.eso.EsoEnvironment>>(emptyList()) }
+    var selectedEnv by remember { mutableStateOf<dev.omalauncher.linux.eso.EsoEnvironment?>(null) }
+    var picked by rememberSaveable { mutableStateOf(listOf("agy", "claude")) }
     val install = rememberLinuxInstall(runtime)
-    BasicText("arch linux, optional", style = Mono.copy(fontSize = TextSize.Large))
+
+    LaunchedEffect(Unit) {
+        val envs = dev.omalauncher.linux.eso.EsoDetector.scanEnvironments(runtime.context)
+        detectedEnvs = envs
+        val rootEnv = envs.firstOrNull { it.isRoot }
+        if (rootEnv != null) {
+            selectedEnv = rootEnv
+        } else {
+            selectedEnv = envs.firstOrNull()
+        }
+    }
+
+    BasicText("linux environment, optional", style = Mono.copy(fontSize = TextSize.Large))
     Spacer(Modifier.height(8.dp))
     BasicText(
-        "Linux apps, terminal widgets, coding agents, pacman and Files. About 1 GB to download and 3 GB of space; installs in the background.",
+        "Linux apps, terminal widgets, coding agents, and Wayland display server.",
         style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
     )
     Spacer(Modifier.height(16.dp))
-    // Above the agent list, so it's in reach without scrolling.
-    PrimaryButton(if (picked.isEmpty()) "install linux" else "install linux and ${picked.size} agent${if (picked.size == 1) "" else "s"}", Modifier.takesPassedKeys().passesKeys()) {
+
+    if (detectedEnvs.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (env in detectedEnvs) {
+                Choice(
+                    title = if (env.isRoot) "⚡ ${env.displayName}" else env.displayName,
+                    subtitle = env.description,
+                    picked = selectedEnv?.id == env.id,
+                    onToggle = { selectedEnv = env }
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+
+    val buttonText = if (selectedEnv?.isRoot == true) {
+        "connect ${selectedEnv?.displayName}"
+    } else {
+        if (picked.isEmpty()) "install linux" else "install linux and ${picked.size} agent${if (picked.size == 1) "" else "s"}"
+    }
+
+    PrimaryButton(buttonText, Modifier.takesPassedKeys().passesKeys()) {
+        selectedEnv?.let {
+            dev.omalauncher.linux.eso.EsoDetector.setActiveEnvironment(runtime.context, it)
+        }
         install(picked)
     }
     Spacer(Modifier.height(24.dp))
@@ -109,22 +146,27 @@ private fun InstallOffer(runtime: Runtime) {
 
 @Composable
 private fun Installed(runtime: Runtime) {
+    val env = runtime.proot.activeEnvironment
     var size by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(Unit) { size = withContext(Dispatchers.IO) { diskUsage(runtime.proot.rootfs) } }
+    LaunchedEffect(Unit) {
+        if (!env.isRoot) {
+            size = withContext(Dispatchers.IO) { diskUsage(runtime.proot.rootfs) }
+        }
+    }
     var confirm by remember { mutableStateOf(false) }
     Row(
         Modifier.card(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            BasicText("arch linux", style = Mono.copy(fontSize = TextSize.Item))
+            BasicText(env.displayName.lowercase(), style = Mono.copy(fontSize = TextSize.Item))
             BasicText(
-                "installed · " + (size?.let(::formatSize) ?: "measuring…"),
+                if (env.isRoot) "connected · root chroot (${env.rootfsPath})" else "installed · " + (size?.let(::formatSize) ?: "measuring…"),
                 style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
             )
         }
     }
-    if (runtime.gpu.supported) {
+    if (runtime.gpu.supported && !env.isRoot) {
         Spacer(Modifier.height(8.dp))
         GpuRow(runtime)
     }
@@ -133,20 +175,28 @@ private fun Installed(runtime: Runtime) {
     val ask = remember { FocusRequester() }
     val cancel = remember { FocusRequester() }
     if (!confirm) {
-        BracketAction("remove linux", Palette.red, Modifier.focusRequester(ask).passesKeys(cancel)) { confirm = true }
+        val label = if (env.isRoot) "disconnect environment" else "remove linux"
+        BracketAction(label, Palette.red, Modifier.focusRequester(ask).passesKeys(cancel)) { confirm = true }
     } else {
         Column(
             Modifier.card(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BasicText("remove linux?", style = Mono.copy(color = Palette.red))
-            BasicText(
+            val title = if (env.isRoot) "disconnect environment?" else "remove linux?"
+            val msg = if (env.isRoot) {
+                "Disconnects from ${env.displayName}. Your files and packages inside ${env.rootfsPath} will NOT be deleted."
+            } else {
                 "Deletes Linux apps, coding agents, packages and everything in /root, like Downloads. " +
-                    "Themes, wallpapers, widgets and your home screen stay.",
+                    "Themes, wallpapers, widgets and your home screen stay."
+            }
+            BasicText(title, style = Mono.copy(color = Palette.red))
+            BasicText(
+                msg,
                 style = Mono.copy(color = Palette.muted, fontSize = TextSize.Small),
             )
             Row {
-                BracketAction("remove", Palette.red, Modifier.passesKeys(), runtime::removeLinux)
+                val actionLabel = if (env.isRoot) "disconnect" else "remove"
+                BracketAction(actionLabel, Palette.red, Modifier.passesKeys(), runtime::removeLinux)
                 BracketAction("cancel", Palette.muted, Modifier.focusRequester(cancel).passesKeys(ask)) { confirm = false }
             }
         }

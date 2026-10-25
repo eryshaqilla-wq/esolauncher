@@ -164,7 +164,7 @@ class Bootstrap(
     val isInstalled get() = _state.value == LinuxState.Installed
 
     /** An install was started (and may still need to finish), or one finished. */
-    val wanted get() = journal.setupComplete || choiceFile.exists()
+    val wanted get() = proot.activeEnvironment.isRoot || journal.setupComplete || choiceFile.exists()
 
     /** Update steps running after the home screen is up; Idle when there are none. */
     private val _updates = MutableStateFlow<JobState>(JobState.Idle)
@@ -236,6 +236,11 @@ class Bootstrap(
     suspend fun run() =
         withContext(Dispatchers.IO) {
             try {
+                val env = proot.activeEnvironment
+                if (env.isRoot) {
+                    _state.value = LinuxState.Installed
+                    return@withContext
+                }
                 when {
                     journal.setupComplete -> update()
                     !choiceFile.exists() -> {
@@ -284,6 +289,12 @@ class Bootstrap(
     /** Starts installing Linux with [picked] coding agents; see [run]. */
     suspend fun install(picked: List<Agent>) {
         choose(picked)
+        val env = proot.activeEnvironment
+        if (env.isRoot) {
+            journal.record("root-installed")
+            _state.value = LinuxState.Installed
+            return
+        }
         run()
     }
 
@@ -296,11 +307,14 @@ class Bootstrap(
             _state.value = LinuxState.Removing
             backlog = emptyList()
             pacman.lock.withLock {
-                try {
-                    LauncherData.deleteTree(proot.rootfs)
-                } catch (e: Exception) {
-                    // Whatever is left can't run; a later install unpacks over a fresh directory anyway.
-                    Log.e(TAG, "rootfs not fully deleted", e)
+                val env = proot.activeEnvironment
+                if (!env.isRoot) {
+                    try {
+                        LauncherData.deleteTree(proot.rootfs)
+                    } catch (e: Exception) {
+                        // Whatever is left can't run; a later install unpacks over a fresh directory anyway.
+                        Log.e(TAG, "rootfs not fully deleted", e)
+                    }
                 }
                 journal.reset()
                 provisioner.forgetAll()
