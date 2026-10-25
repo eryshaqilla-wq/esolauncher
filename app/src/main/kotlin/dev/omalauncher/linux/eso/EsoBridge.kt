@@ -2,21 +2,52 @@ package dev.omalauncher.linux.eso
 
 import android.content.Context
 import dev.omalauncher.linux.shellQuote
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import java.io.File
 import java.util.TimeZone
+import java.util.zip.GZIPInputStream
 
 /**
  * Command builder and bridge dispatcher for root chroot/containers.
  * Executes root commands cleanly via su without complex escaping or mount namespace locks.
+ * Includes Standalone VirGL 3D acceleration engine (zero dependency on Termux).
  */
 object EsoBridge {
     /**
-     * Prepares permissions, mount points, and SELinux policies once during initialization.
+     * Unpacks the bundled standalone VirGL server and libraries into internal storage.
+     */
+    fun unpackVirglBundle(context: Context, destDir: File) {
+        if (File(destDir, "virgl_test_server_android").isFile) return
+        destDir.mkdirs()
+        runCatching {
+            context.assets.open("virgl/virgl-android.tar.gz").use { input ->
+                TarArchiveInputStream(GZIPInputStream(input.buffered(1 shl 16))).use { tar ->
+                    while (true) {
+                        val entry = tar.nextEntry ?: break
+                        if (entry.isDirectory) continue
+                        val name = entry.name.removePrefix("./").removePrefix("/")
+                        val out = File(destDir, name)
+                        out.parentFile?.mkdirs()
+                        out.outputStream().use { tar.copyTo(it) }
+                        out.setExecutable(true, false)
+                        out.setReadable(true, false)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Prepares permissions, mount points, SELinux policies, and launches Standalone VirGL server.
      */
     fun prepareEnvironment(context: Context, env: EsoEnvironment, runtimeDir: File) {
         if (!env.isRoot) return
         val rootfs = env.rootfsPath
         val waylandSocketName = "wayland-0"
+        val virglDir = File(context.filesDir, "virgl")
+
+        // Unpack standalone VirGL binaries
+        unpackVirglBundle(context, virglDir)
 
         runCatching {
             runtimeDir.mkdirs()
@@ -40,17 +71,29 @@ object EsoBridge {
             if ! grep -q "$rootfs/run/user/0" /proc/mounts; then
                 /system/bin/toybox mount "${runtimeDir.path}" "$rootfs/run/user/0" 2>/dev/null || true
             fi
+
+            # Standalone VirGL 3D Server Superpower (100% Independent of Termux)
+            chmod -R 777 "${virglDir.path}" 2>/dev/null || true
+            VIRGL_BIN="${virglDir.path}/virgl_test_server_android"
+            VIRGL_LIB="${virglDir.path}/lib"
+            if [ ! -f "${'$'}VIRGL_BIN" ] && [ -f "/data/local/tmp/eso_bins/virgl/virgl_test_server_android" ]; then
+                VIRGL_BIN="/data/local/tmp/eso_bins/virgl/virgl_test_server_android"
+                VIRGL_LIB="/data/local/tmp/eso_bins/virgl/lib"
+            fi
+            if [ ! -f "${'$'}VIRGL_BIN" ] && [ -f "/data/data/com.termux/files/usr/bin/virgl_test_server_android" ]; then
+                VIRGL_BIN="/data/data/com.termux/files/usr/bin/virgl_test_server_android"
+                VIRGL_LIB="/data/data/com.termux/files/usr/opt/virglrenderer-android/lib"
+            fi
+
             mkdir -p "$rootfs/tmp/.virgl" 2>/dev/null || true
-            mkdir -p "$rootfs/data/data/com.termux/files/usr/tmp/.virgl" 2>/dev/null || true
-            if [ -d "/data/data/com.termux/files/usr/tmp/.virgl" ]; then
-                chmod 777 /data/data/com.termux/files/usr/tmp/.virgl 2>/dev/null || true
-                chmod 666 /data/data/com.termux/files/usr/tmp/.virgl/.virgl_test 2>/dev/null || true
-                if ! grep -q "$rootfs/data/data/com.termux/files/usr/tmp/.virgl" /proc/mounts; then
-                    /system/bin/toybox mount -o bind /data/data/com.termux/files/usr/tmp/.virgl "$rootfs/data/data/com.termux/files/usr/tmp/.virgl" 2>/dev/null || true
+            if ! pgrep -f virgl_test_server >/dev/null 2>&1; then
+                if [ -x "${'$'}VIRGL_BIN" ]; then
+                    nohup env TMPDIR="$rootfs/tmp" LD_LIBRARY_PATH="${'$'}VIRGL_LIB" "${'$'}VIRGL_BIN" --angle-gl --socket-path "$rootfs/tmp/.virgl_test" >/dev/null 2>&1 &
                 fi
             fi
-            ln -sfn /data/data/com.termux/files/usr/tmp/.virgl/.virgl_test "$rootfs/tmp/.virgl/.virgl_test" 2>/dev/null || true
-            ln -sfn /data/data/com.termux/files/usr/tmp/.virgl/.virgl_test "$rootfs/tmp/.virgl_test" 2>/dev/null || true
+            sleep 0.2
+            chmod 666 "$rootfs/tmp/.virgl_test" 2>/dev/null || true
+            ln -sfn /tmp/.virgl_test "$rootfs/tmp/.virgl/.virgl_test" 2>/dev/null || true
         """.trimIndent()
 
         runCatching {
@@ -88,7 +131,7 @@ object EsoBridge {
             "MOZ_ENABLE_WAYLAND=1",
             "SDL_VIDEODRIVER=wayland",
             "GALLIUM_DRIVER=virpipe",
-            "VTEST_SOCKET_NAME=/tmp/.virgl/.virgl_test",
+            "VTEST_SOCKET_NAME=/tmp/.virgl_test",
             "MESA_GL_VERSION_OVERRIDE=4.0",
             "MESA_GLES_VERSION_OVERRIDE=3.2",
             "PULSE_SERVER=" + if (env.type == EsoRunnerType.DROIDSPACES) "tcp:172.28.0.1:4713" else "tcp:127.0.0.1:4713"

@@ -24,7 +24,7 @@ enum class EsoGpuMode(val id: String, val label: String) {
 
 val VIRGL_GRAPHICS_ENV = listOf(
     "GALLIUM_DRIVER=virpipe",
-    "VTEST_SOCKET_NAME=/tmp/.virgl/.virgl_test",
+    "VTEST_SOCKET_NAME=/tmp/.virgl_test",
     "MESA_GL_VERSION_OVERRIDE=4.0",
     "MESA_GLES_VERSION_OVERRIDE=3.2",
 )
