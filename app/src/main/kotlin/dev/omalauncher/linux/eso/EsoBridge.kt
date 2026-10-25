@@ -68,12 +68,28 @@ object EsoBridge {
             chmod 777 "$rootfs/run/user/0" 2>/dev/null || true
             mkdir -p "$rootfs/root/.local/share/applications" 2>/dev/null || true
             chmod 777 "$rootfs/root/.local" "$rootfs/root/.local/share" "$rootfs/root/.local/share/applications" 2>/dev/null || true
+            if [ -S "${runtimeDir.path}/$waylandSocketName" ] && [ ! -S "$rootfs/run/user/0/$waylandSocketName" ]; then
+                /system/bin/umount -l "$rootfs/run/user/0" 2>/dev/null || true
+            fi
             if ! grep -q "$rootfs/run/user/0" /proc/mounts; then
-                /system/bin/toybox mount "${runtimeDir.path}" "$rootfs/run/user/0" 2>/dev/null || true
+                /system/bin/toybox mount -o bind "${runtimeDir.path}" "$rootfs/run/user/0" 2>/dev/null || /system/bin/mount -o bind "${runtimeDir.path}" "$rootfs/run/user/0" 2>/dev/null || true
             fi
             chmod 666 "${runtimeDir.path}/audio.fifo" 2>/dev/null || true
             chmod -R 777 "${runtimeDir.path}/pulse" 2>/dev/null || true
             chmod 666 "${runtimeDir.path}/pulse/native" 2>/dev/null || true
+
+            # Root XDG runtime directory (mode 0700, owned by 0:0 for Firefox, GTK & Qt compliance)
+            mkdir -p "$rootfs/tmp/runtime-root" 2>/dev/null || true
+            chmod 700 "$rootfs/tmp/runtime-root" 2>/dev/null || true
+            chown 0:0 "$rootfs/tmp/runtime-root" 2>/dev/null || true
+            ln -sfn /run/user/0/wayland-0 "$rootfs/tmp/runtime-root/wayland-0" 2>/dev/null || true
+            ln -sfn /run/user/0/pulse "$rootfs/tmp/runtime-root/pulse" 2>/dev/null || true
+            ln -sfn /run/user/0/audio.fifo "$rootfs/tmp/runtime-root/audio.fifo" 2>/dev/null || true
+
+            # Chromium sandbox config for root
+            if [ -d "$rootfs/etc/chromium.d" ]; then
+                echo 'export CHROMIUM_FLAGS="${'$'}CHROMIUM_FLAGS --no-sandbox"' > "$rootfs/etc/chromium.d/99-root-sandbox" 2>/dev/null || true
+            fi
 
             # Standalone VirGL 3D Server Superpower (100% Independent of Termux)
             chmod -R 777 "${virglDir.path}" 2>/dev/null || true
@@ -132,7 +148,7 @@ object EsoBridge {
         val pulseServer = if (hasTcpPulse) {
             if (env.type == EsoRunnerType.DROIDSPACES) "tcp:172.28.0.1:4713" else "tcp:127.0.0.1:4713"
         } else {
-            "unix:/run/user/0/pulse/native"
+            "unix:/tmp/runtime-root/pulse/native"
         }
 
         val envVars = listOf(
@@ -142,7 +158,7 @@ object EsoBridge {
             "TZ=$tz",
             "TERM=xterm-256color",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin:/root/.opencode/bin",
-            "XDG_RUNTIME_DIR=/run/user/0",
+            "XDG_RUNTIME_DIR=/tmp/runtime-root",
             "WAYLAND_DISPLAY=$waylandSocketName",
             "XDG_SESSION_TYPE=wayland",
             "GDK_BACKEND=wayland",
@@ -156,13 +172,19 @@ object EsoBridge {
             "PULSE_SERVER=$pulseServer"
         ).joinToString(" ")
 
+        // Sanitize script: strip redundant pkexec and add --no-sandbox if running chromium/electron as root
+        var sanitizedScript = script.replace(Regex("""\bpkexec\s+"""), "")
+        if ((sanitizedScript.contains("chromium") || sanitizedScript.contains("antigravity") || sanitizedScript.contains("code")) && !sanitizedScript.contains("--no-sandbox")) {
+            sanitizedScript = sanitizedScript.replace(Regex("""(?<=\b(chromium|google-chrome|brave|antigravity|code)\b)"""), " --no-sandbox")
+        }
+
         val command = when (env.type) {
             EsoRunnerType.DROIDSPACES -> {
                 val dsBin = "/data/local/Droidspaces/bin/droidspaces"
-                "if [ -x $dsBin ]; then $dsBin exec --name=${env.containerName} /usr/bin/env -i $envVars /bin/sh -c ${shellQuote(script)}; else chroot $rootfs /usr/bin/env -i $envVars /bin/sh -c ${shellQuote(script)}; fi"
+                "if [ -x $dsBin ]; then $dsBin exec --name=${env.containerName} /usr/bin/env -i $envVars /bin/sh -c ${shellQuote(sanitizedScript)}; else chroot $rootfs /usr/bin/env -i $envVars /bin/sh -c ${shellQuote(sanitizedScript)}; fi"
             }
             else -> {
-                "chroot $rootfs /usr/bin/env -i $envVars /bin/sh -c ${shellQuote(script)}"
+                "chroot $rootfs /usr/bin/env -i $envVars /bin/sh -c ${shellQuote(sanitizedScript)}"
             }
         }
 

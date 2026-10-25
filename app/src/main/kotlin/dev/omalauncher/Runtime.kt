@@ -319,6 +319,12 @@ class Runtime(
             // Linux installed again: its new home has no foot-font.ini yet.
             terminalFont.write()
         }
+        val env = proot.activeEnvironment
+        if (env.isRoot) {
+            withContext(Dispatchers.IO) {
+                dev.omalauncher.linux.eso.EsoBridge.prepareEnvironment(context, env, proot.runtimeDir)
+            }
+        }
         linux = true
         // A font picked from Linux that wasn't remembered at start (or was installed since) loads now.
         scope.launch { launcherFont.apply() }
@@ -536,10 +542,13 @@ class Runtime(
         if (agent != null) launchedAgents[appId] = agent
         val env = proot.activeEnvironment
         val args = if (command != null) {
-            val shell = if (env.isRoot) "zsh" else "bash"
+            val shell = if (env.isRoot) {
+                if (java.io.File(env.rootfsPath, "bin/zsh").exists() || java.io.File(env.rootfsPath, "usr/bin/zsh").exists()) "zsh" else "bash"
+            } else "bash"
             " -e $shell -c " + shellQuote(command)
         } else if (env.isRoot) {
-            " -e /bin/zsh -l"
+            val zsh = if (java.io.File(env.rootfsPath, "bin/zsh").exists() || java.io.File(env.rootfsPath, "usr/bin/zsh").exists()) "/bin/zsh" else "/bin/bash"
+            " -e $zsh -l"
         } else {
             ""
         }
