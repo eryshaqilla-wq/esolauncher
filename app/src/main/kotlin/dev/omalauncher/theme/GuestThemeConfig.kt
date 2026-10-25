@@ -26,17 +26,19 @@ class GuestThemeConfig(
      * include. A file the theme ships wins over the template's.
      */
     fun render(theme: OmarchyTheme) {
-        val themeDir = File(currentDir, "theme")
-        themeDir.deleteRecursively()
-        themeDir.mkdirs()
-        theme.guestFiles().forEach { (name, file) -> file.copyTo(File(themeDir, name)) }
-        File(currentDir, "theme.name").writeText(theme.name + "\n")
-        templatesDir.listFiles { f -> f.extension == "tpl" }.orEmpty().forEach { tpl ->
-            val out = File(themeDir, tpl.nameWithoutExtension)
-            val colors = if (tpl.name == "foot.ini.tpl") footColors(theme.colors) else theme.colors
-            if (!out.exists()) out.writeText(Templates.render(tpl.readText(), colors))
+        runCatching {
+            val themeDir = File(currentDir, "theme")
+            themeDir.deleteRecursively()
+            themeDir.mkdirs()
+            theme.guestFiles().forEach { (name, file) -> file.copyTo(File(themeDir, name)) }
+            File(currentDir, "theme.name").writeText(theme.name + "\n")
+            templatesDir.listFiles { f -> f.extension == "tpl" }.orEmpty().forEach { tpl ->
+                val out = File(themeDir, tpl.nameWithoutExtension)
+                val colors = if (tpl.name == "foot.ini.tpl") footColors(theme.colors) else theme.colors
+                if (!out.exists()) out.writeText(Templates.render(tpl.readText(), colors))
+            }
+            symlink("${Proot.GUEST_HOME}/.local/state/omarchy/current/theme/btop.theme", File(home, ".config/btop/themes/current.theme"))
         }
-        symlink("${Proot.GUEST_HOME}/.local/state/omarchy/current/theme/btop.theme", File(home, ".config/btop/themes/current.theme"))
     }
 
     /** Mirrors Omarchy's ~/.local/state/omarchy/current/background symlink. */
@@ -55,6 +57,7 @@ class GuestThemeConfig(
 
     /** Configs for Omarchy's terminal apps and GTK, the latter in [theme]'s colors. */
     fun managed(theme: OmarchyTheme?): List<Managed> {
+        if (proot.activeEnvironment.isRoot) return emptyList()
         val files = ArrayList<Managed>()
         fun seed(
             path: String,

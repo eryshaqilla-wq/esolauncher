@@ -86,6 +86,7 @@ class SystemUpdates(
 
     /** Checks unless the last check is recent; [force] checks anyway. */
     suspend fun check(force: Boolean = false) {
+        if (proot.activeEnvironment.isRoot) return
         val now = System.currentTimeMillis()
         if (checking || job is JobState.Working) return
         if (!force && (now - (pending?.checkedAt ?: 0L) < CHECK_INTERVAL_MS || now - lastAttempt < RETRY_MS)) return

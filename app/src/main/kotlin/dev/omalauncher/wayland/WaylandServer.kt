@@ -79,6 +79,9 @@ class WaylandServer(
     fun start() {
         listenFd = Native.listen(socketPath)
         check(listenFd >= 0) { "cannot listen on $socketPath: errno ${-listenFd}" }
+        runCatching {
+            android.system.Os.chmod(socketPath, 0x1b6) // 0666
+        }
         Log.i(TAG, "listening on $socketPath")
         thread(name = "wl-accept", isDaemon = true) {
             while (true) {

@@ -28,13 +28,17 @@ private val FIELD_CODE = Regex("%[fFuUdDnNickvm]")
  * NoDisplay=true file in ~/.local/share/applications hides a package's entry.
  */
 fun loadLinuxApps(proot: Proot): List<LinuxApp> {
-    val dirs = mutableListOf(proot.applications, File(proot.rootfs, "usr/share/applications"))
+    val dirs = mutableListOf(
+        proot.applications,
+        File(proot.rootfs, "usr/share/applications"),
+        File(proot.rootfs, "usr/local/share/applications")
+    )
     val env = proot.activeEnvironment
     if (env.isRoot) {
         val rootDesktopCache = File(proot.filesDir, "root_desktops")
         runCatching {
             rootDesktopCache.mkdirs()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "if command -v magiskpolicy >/dev/null 2>&1; then magiskpolicy --live 'permissive untrusted_app' 'permissive untrusted_app_all' 2>/dev/null || true; fi; cp -u ${env.rootfsPath}/usr/share/applications/*.desktop ${rootDesktopCache.path}/ 2>/dev/null; chmod 666 ${rootDesktopCache.path}/*.desktop 2>/dev/null")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "cp -u ${env.rootfsPath}/usr/share/applications/*.desktop ${rootDesktopCache.path}/ 2>/dev/null; chmod 666 ${rootDesktopCache.path}/*.desktop 2>/dev/null")).waitFor()
         }
         if (rootDesktopCache.isDirectory) {
             dirs.add(rootDesktopCache)

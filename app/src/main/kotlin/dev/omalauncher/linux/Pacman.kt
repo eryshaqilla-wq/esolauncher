@@ -49,8 +49,9 @@ class Pacman(
      * The sync repos and the AUR together, best name matches first. AUR packages
      * with the same name as a repo package are left out: pacman would win anyway.
      */
-    suspend fun search(query: String): List<Package> =
-        coroutineScope {
+    suspend fun search(query: String): List<Package> {
+        if (proot.activeEnvironment.isRoot) return emptyList()
+        return coroutineScope {
             val q = query.trim()
             val aur = async { Aur.search(q) }
             val repos = searchRepos(q)
@@ -69,6 +70,7 @@ class Pacman(
                     ),
                 ).take(MAX_RESULTS)
         }
+    }
 
     /** `pacman -Ss` against the local sync databases. */
     private suspend fun searchRepos(q: String): List<Package> {
@@ -112,8 +114,9 @@ class Pacman(
      * Explicitly installed packages (what `pacman -Qe` lists), read straight from the
      * local database: much faster than starting proot.
      */
-    suspend fun installed(): List<Package> =
-        withContext(Dispatchers.IO) {
+    suspend fun installed(): List<Package> {
+        if (proot.activeEnvironment.isRoot) return emptyList()
+        return withContext(Dispatchers.IO) {
             localDb
                 .listFiles()
                 .orEmpty()
@@ -125,6 +128,7 @@ class Pacman(
                     Package(name, fields["VERSION"].orEmpty(), fields["DESC"].orEmpty(), null, installed = true)
                 }.sortedBy { it.name }
         }
+    }
 
     /** A local db `desc` file: `%KEY%` lines, each followed by its value (first line kept). */
     private fun parseDesc(lines: List<String>): Map<String, String> {
@@ -137,18 +141,21 @@ class Pacman(
     }
 
     /** A full sync plus the package, like the bootstrap: never a partial upgrade. */
-    suspend fun install(pkg: Package) =
-        if (pkg.repo == AUR) {
+    suspend fun install(pkg: Package): Boolean {
+        if (proot.activeEnvironment.isRoot) return false
+        return if (pkg.repo == AUR) {
             run(pkg.name, "building", "/usr/local/lib/aur/install.sh ${shellQuote(pkg.name)}")
         } else {
             run(pkg.name, "installing", pacmanInstall(listOf(pkg.name)))
         }
+    }
 
     /**
      * The AUR build scripts (assets/aur) in the guest's /usr/local/lib/aur, the fakeroot shim in its bin,
      * and the yay wrapper that builds as a user even when called as root (by App Finder, say).
      */
     fun managed(): List<Managed> {
+        if (proot.activeEnvironment.isRoot) return emptyList()
         val dir = File(proot.rootfs, "usr/local/lib/aur")
         return listOf(
             "install.sh" to File(dir, "install.sh"),
@@ -160,7 +167,10 @@ class Pacman(
     }
 
     /** Removes the package and the dependencies nothing else needs. */
-    suspend fun remove(name: String) = run(name, "removing", "pacman -Rns --noconfirm ${shellQuote(name)}")
+    suspend fun remove(name: String): Boolean {
+        if (proot.activeEnvironment.isRoot) return false
+        return run(name, "removing", "pacman -Rns --noconfirm ${shellQuote(name)}")
+    }
 
     /** Kept between searches: starting proot costs more than the search. */
     private val shell = GuestShell(proot)

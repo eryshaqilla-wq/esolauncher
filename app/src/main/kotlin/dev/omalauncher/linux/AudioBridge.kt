@@ -70,6 +70,7 @@ class AudioBridge(
 
     /** Starts the bridge, or resumes it after [stop]. */
     fun start() {
+        if (proot.activeEnvironment.isRoot) return
         running = true
         if (started) return
         started = true

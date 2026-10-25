@@ -124,7 +124,22 @@ class AgentStore(
     val states = mutableStateMapOf<String, JobState>()
 
     /** Shims are symlinks to a guest path (/root/.local/bin/mise), so don't follow them from the host. */
-    fun isInstalled(agent: Agent) = Files.exists(File(shims, agent.bin).toPath(), LinkOption.NOFOLLOW_LINKS)
+    fun isInstalled(agent: Agent): Boolean {
+        val env = proot.activeEnvironment
+        if (env.isRoot) {
+            val rootfs = File(env.rootfsPath)
+            val candidates = listOf(
+                File(rootfs, "root/.local/bin/${agent.bin}"),
+                File(rootfs, "usr/local/bin/${agent.bin}"),
+                File(rootfs, "usr/bin/${agent.bin}"),
+                File(rootfs, "root/.opencode/bin/${agent.bin}"),
+                File(rootfs, "root/.gemini/antigravity-cli/bin/${agent.bin}"),
+                File(rootfs, "root/.local/share/mise/shims/${agent.bin}")
+            )
+            if (candidates.any { it.exists() }) return true
+        }
+        return Files.exists(File(shims, agent.bin).toPath(), LinkOption.NOFOLLOW_LINKS)
+    }
 
     /** The agent picked in the prompt bar, kept in the guest home where scripts can read it too. */
     private val preferredFile get() = File(proot.launcherConfig, "agent")
@@ -134,6 +149,15 @@ class AgentStore(
     fun load() {
         preferred = runCatching { preferredFile.readText().trim() }.getOrNull()
         refresh()
+        if (preferred == null && proot.activeEnvironment.isRoot) {
+            val best = installed.firstOrNull { it.bin == "agy" }
+                ?: installed.firstOrNull { it.bin == "opencode" }
+                ?: installed.firstOrNull { it.bin == "copilot" }
+                ?: installed.firstOrNull()
+            if (best != null) {
+                choose(best)
+            }
+        }
     }
 
     /** Installed agents in Omarchy's order; re-read from disk after installs and removals. */
@@ -161,9 +185,25 @@ class AgentStore(
     /** Installs [agent] with mise, bootstrapping mise itself if needed. */
     fun installScript(agent: Agent) =
         buildString {
-            append(if (mise.exists()) "$MISE_SELF_UPDATE && " else "curl -fsSL https://mise.run | sh && ")
-            if (agent.node) append("mise use -g node@lts && ")
-            append("mise use -g ${shellQuote(agent.pkg)} && $MISE_CLEANUP")
+            val env = proot.activeEnvironment
+            if (env.isRoot) {
+                when (agent.bin) {
+                    "agy" -> append("curl -fsSL https://raw.githubusercontent.com/google-deepmind/antigravity/main/install.sh | bash 2>/dev/null || npm install -g antigravity-cli")
+                    "opencode" -> append("npm install -g @opencode/cli")
+                    "copilot" -> append("npm install -g @github/copilot")
+                    "claude" -> append("npm install -g @anthropic-ai/claude-code")
+                    "grok" -> append("npm install -g @xai-official/grok")
+                    else -> {
+                        append(if (mise.exists()) "$MISE_SELF_UPDATE && " else "curl -fsSL https://mise.run | sh && ")
+                        if (agent.node) append("mise use -g node@lts && ")
+                        append("mise use -g ${shellQuote(agent.pkg)} && $MISE_CLEANUP")
+                    }
+                }
+            } else {
+                append(if (mise.exists()) "$MISE_SELF_UPDATE && " else "curl -fsSL https://mise.run | sh && ")
+                if (agent.node) append("mise use -g node@lts && ")
+                append("mise use -g ${shellQuote(agent.pkg)} && $MISE_CLEANUP")
+            }
         }
 
     /** Call after [installScript] succeeded: makes the agent show up in the drawer. */
@@ -197,7 +237,7 @@ class AgentStore(
      * the user's ~/.codex/config.toml stays theirs and can change both.
      */
     private fun codexConfig() =
-        if (installed.none { it.bin == "codex" }) {
+        if (proot.activeEnvironment.isRoot || installed.none { it.bin == "codex" }) {
             emptyList()
         } else {
             listOf(

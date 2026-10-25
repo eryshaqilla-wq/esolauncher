@@ -37,8 +37,8 @@ class Gpu(
         runCatching { File("/sys/class/kgsl/kgsl-3d0/gpu_model").readText() }.getOrNull(),
     )?.let(GpuDrivers::of)
 
-    /** The phone has a GPU we have a driver for. */
-    val supported = spec != null
+    /** The phone has a GPU we have a driver for (disabled in root mode to prevent kernel GPU panic). */
+    val supported: Boolean get() = spec != null && !proot.activeEnvironment.isRoot
 
     /** "Mali" or "Adreno", for the settings row. Empty when [supported] is false. */
     val driverLabel: String get() = spec?.label ?: ""
@@ -67,6 +67,10 @@ class Gpu(
      * software meanwhile) and stays off if the check fails.
      */
     suspend fun recheck() {
+        if (proot.activeEnvironment.isRoot) {
+            proot.graphicsEnv = SOFTWARE_ENV
+            return
+        }
         val driver = spec ?: return
         if (!wanted || active || state is JobState.Working) return
         if (!proot.hostFile(driver.driverPath).isFile) return turnOff()
@@ -106,6 +110,10 @@ class Gpu(
 
     /** Installs the driver and Mesa, then checks them; turns on only if the check passes. */
     suspend fun turnOn() {
+        if (proot.activeEnvironment.isRoot) {
+            proot.graphicsEnv = SOFTWARE_ENV
+            return
+        }
         val driver = spec ?: return
         if (state is JobState.Working) return
         prefs.edit().putBoolean(WANTED, true).apply()

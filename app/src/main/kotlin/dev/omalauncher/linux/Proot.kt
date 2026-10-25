@@ -117,6 +117,7 @@ class Proot(
         }
         val env = activeEnvironment
         if (env.isRoot) {
+            dev.omalauncher.linux.eso.EsoBridge.prepareEnvironment(context, env, runtimeDir)
             return
         }
         // proot skips a bind whose host directory is missing, and the guest would then write into the rootfs.
